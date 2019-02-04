@@ -1,4 +1,4 @@
-import os
+import os, itertools
 from shutil import copyfile, rmtree
 
 import pandas as pd # for import/export/manipulate data
@@ -104,8 +104,8 @@ sample_train_dir = path + "sample_train"
 
 n_train = 2*len(os.listdir(os.path.join(sample_train_dir,"0")))
 n_test = 2*len(os.listdir(os.path.join(sample_test_dir,"0")))
-train_batch = 1
-val_batch = 1
+train_batch = 100
+val_batch = 100
 
 train_steps = np.ceil(n_train/train_batch)
 val_steps = np.ceil(n_test/val_batch)
@@ -135,7 +135,15 @@ pool_size= (2,2)
 first_filters = 32
 second_filters = 2*first_filters
 third_filters = 4*first_filters
-alpha = 1e-4
+alpha = 1e-3 # learning rate
+
+#loss function after the first epoch: 0.71, accuracy - 0.5
+#2nd epoch: 0.67 loss function, accuracy = 0.57
+#Epoch 1 loss function 1e-4: 0.687, accuracy - 0.559
+#epoch 2 loss 0.5531, accuracy = 0.7725
+
+# alpha = 0.01 no convergence is reached
+# alpha = 1e-3 is the "optimized value for alpha"
 
 dropout_conv = 0.2
 dropout_dense = 0.2
@@ -168,9 +176,59 @@ model.summary()
 
 model.compile(Adam(lr=alpha), loss='binary_crossentropy', metrics=['accuracy'])
 
-cnn = model.fit_generator(train_gen, steps_per_epoch=train_steps, 
-                    validation_data=val_gen,
-                    validation_steps=val_steps,
+
+cnn = model.fit_generator(train_gen, steps_per_epoch=train_steps,
                     epochs=20, verbose=1)
 
+plt.figure(1)
+plt.plot(cnn.history['acc'],'*-',color='b')
+plt.show()
 
+plt.figure(2)
+plt.plot(cnn.history['loss'],'*-',color='r')
+plt.show()
+
+y_test = test_gen.classes
+pred_proba = model.predict(test_gen)
+y_pred = pred_proba.argmax(axis=1)
+cm = confusion_matrix(y_test, y_pred)
+
+classes = ['no cancer', 'cancer']
+
+def plot_confusion_matrix(cm, classes,
+                          normalize=False,
+                          title='Confusion matrix',
+                          cmap=plt.cm.Blues):
+    """
+    This function prints and plots the confusion matrix.
+    Normalization can be applied by setting `normalize=True`.
+    """
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        print("Normalized confusion matrix")
+    else:
+        print('Confusion matrix, without normalization')
+
+    print(cm)
+
+    plt.imshow(cm, interpolation='nearest', cmap=cmap)
+    plt.title(title)
+    plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+
+    fmt = '.2f' if normalize else 'd'
+    thresh = cm.max() / 2.
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        plt.text(j, i, format(cm[i, j], fmt),
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black")
+
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.tight_layout()
+
+plt.figure(3)
+plot_confusion_matrix(cm, classes)
+plt.show()
