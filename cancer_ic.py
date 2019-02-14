@@ -1,4 +1,4 @@
-import os, itertools
+import os
 from shutil import copyfile, rmtree
 
 import pandas as pd # for import/export/manipulate data
@@ -17,218 +17,244 @@ from sklearn.utils import shuffle
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 
+from utils import plot_confusion_matrix
+
 #%%
-size = 96
+IMG_SIZE = 96
+
 n_sample = 1000
+
+N_CHANNEL = 3
 
 path = "/Users/Qi-MAC/Work/storage/" # path you put all the data, don't forget the ending slash!
 
-print(os.listdir(path))
 
 #%%
-'''
-df = pd.read_csv(path+"train_labels.csv")
-
-def df_info(df):
-    print(df.shape) # shape of the df
-    print(df.columns) # colnames
-    print(df.isnull().sum()) # detect null values, which is 0 for our dataset
-    print(df.label.value_counts())
-    print(df.label.mean())
-
-print("\nAll images:")
-df_info(df)
-
-df_0 = df[df.label == 0].sample(n_sample, random_state = 0)
-df_1 = df[df.label == 1].sample(n_sample, random_state = 0)
-
-df = pd.concat([df_0, df_1], axis=0).reset_index(drop=True)
-# shuffle
-df = shuffle(df)
-
-print("\nSampled images:")
-df_info(df)
-
-def show_img(label):
-    print("\nView sample images:")
-    sample = df[df.label==label].sample()
-    imgid = sample.id.values[0]
-    print(sample.label.values[0])
-    img = plt.imread(path+ "train/" + imgid + ".tif")
-    plt.imshow(img)
-
-y = df.label
-x_train, x_test = train_test_split(df, test_size=0.2, random_state=0, stratify=y)
-
-sample_test_dir = path + "sample_test"
-sample_train_dir = path + "sample_train"
+class NN_Model(object):
+    def __init__(self, test_gen=None, train_gen=None, train_steps=None, batch_size=1, epochs=1):
+        self.test_gen = test_gen
+        self.train_gen = train_gen
+        self.train_steps = train_steps
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.alpha = None
     
-if os.path.exists(sample_test_dir):
-    rmtree(sample_test_dir)
-if os.path.exists(sample_train_dir):
-    rmtree(sample_train_dir)
-os.mkdir(sample_test_dir)
-os.mkdir(os.path.join(sample_test_dir,"0"))
-os.mkdir(os.path.join(sample_test_dir,"1"))
-os.mkdir(sample_train_dir)
-os.mkdir(os.path.join(sample_train_dir,"0"))
-os.mkdir(os.path.join(sample_train_dir,"1"))
-os.listdir(path)
-
-
-for imgid in list(x_train.id):
-    img = imgid + ".tif"
-    if x_train[x_train.id == imgid].label.iloc[0] == 0:       
-        src = os.path.join(path, "train", img)
-        dst = os.path.join(sample_train_dir,"0", img)
-        copyfile(src, dst)
-    if x_train[x_train.id == imgid].label.iloc[0] == 1:       
-        src = os.path.join(path, "train", img)
-        dst = os.path.join(sample_train_dir,"1", img)
-        copyfile(src, dst)
+    def set_learning_rate(self,lr=1e-5):
+        self.alpha = lr
     
-for imgid in list(x_test.id):
-    img = imgid + ".tif"
-    if x_test[x_test.id == imgid].label.iloc[0] == 0:       
-        src = os.path.join(path, "train", img)
-        dst = os.path.join(sample_test_dir,"0", img)
-        copyfile(src, dst)
-    if x_test[x_test.id == imgid].label.iloc[0] == 1:       
-        src = os.path.join(path, "train", img)
-        dst = os.path.join(sample_test_dir,"1", img)
-        copyfile(src, dst)
-'''
-
-sample_test_dir = path + "sample_test"
-sample_train_dir = path + "sample_train"
-
-n_train = 2*len(os.listdir(os.path.join(sample_train_dir,"0")))
-n_test = 2*len(os.listdir(os.path.join(sample_test_dir,"0")))
-train_batch = 100
-val_batch = 100
-
-train_steps = np.ceil(n_train/train_batch)
-val_steps = np.ceil(n_test/val_batch)
-
-datagen = ImageDataGenerator(rescale=1.0/255)
-
-train_gen = datagen.flow_from_directory(sample_train_dir,
-                                        target_size=(size,size),
-                                        batch_size=train_batch,
-                                        class_mode='categorical')
-
-val_gen = datagen.flow_from_directory(sample_test_dir,
-                                        target_size=(size,size),
-                                        batch_size=val_batch,
-                                        class_mode='categorical')
-
-# Note: shuffle=False causes the test dataset to not be shuffled
-test_gen = datagen.flow_from_directory(sample_test_dir,
-                                        target_size=(size,size),
-                                        batch_size=1,
-                                        class_mode='categorical',
-                                        shuffle=False)
+    def set_epochs(self, epochs=1):
+        self.epochs = epochs
 
 
-kernel_size = (3,3)
-pool_size= (2,2)
-first_filters = 32
-second_filters = 2*first_filters
-third_filters = 4*first_filters
-alpha = 1e-3 # learning rate
+class CNN_Model(NN_Model):
+    def __init__(self, kernel_size=(3,3), pool_size=(2,2), cnn_activation='relu', dense_activation='relu', out_activation='softmax', n_classes=2, n_dense=256):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.pool_size = pool_size
+        self.model = Sequential()
+        self.cnn_activation = cnn_activation
+        self.dense_activation = dense_activation
+        self.out_activation = out_activation
+        self.dropout_conv = 0
+        self.dropout_dense = 0
+        self.isdropout = False
+        self.n_classes = n_classes
+        self.n_dense = n_dense
+        self.result = None
+        self.y_test = None
+        self.pred_proba = None
+        self.y_pred = None
+        self.cm = None
+        
+    def use_dropout(self, dp_conv = 0.2, dp_dense = 0.2):
+        self.isdropout = True
+        self.dropout_conv = dp_conv
+        self.dropout_dense = dp_dense
+        
+    def build_cnn(self, n_filter=[32,64,128]):
+        dropout_conv = self.dropout_conv
+        dropout_dense = self.dropout_dense
+        kernel_size = self.kernel_size
+        pool_size = self.pool_size
+        cnn_activation = self.cnn_activation
+       
+        model = self.model
+        
+        for i in range(len(n_filter)):
+            if i == 0:
+                model.add(Conv2D(n_filter[i], kernel_size, activation=cnn_activation, input_shape = (IMG_SIZE, IMG_SIZE, N_CHANNEL)))
+            else:
+                model.add(Conv2D(n_filter[i], kernel_size, activation=cnn_activation))
+            model.add(MaxPooling2D(pool_size = pool_size)) 
+            if self.isdropout:
+                model.add(Dropout(dropout_conv))
+                
+        model.add(Flatten())
+        model.add(Dense(self.n_dense, activation = self.dense_activation))
+        if self.isdropout:
+            model.add(Dropout(dropout_dense))
+        model.add(Dense(self.n_classes, activation = self.out_activation))
+        
+        model.summary()
+        
+        self.model = model
+    
+    def compile_optimization(self, optimization_fn=Adam, loss='binary_crossentropy', metrics=['accuracy']):     
+        self.model.compile(optimization_fn(lr=self.alpha), loss=loss, metrics=metrics)
+        
+    def run(self):
+        self.result = self.model.fit_generator(self.train_gen, steps_per_epoch=self.train_steps,
+                    epochs=self.epochs, verbose=1)
 
-#loss function after the first epoch: 0.71, accuracy - 0.5
-#2nd epoch: 0.67 loss function, accuracy = 0.57
-#Epoch 1 loss function 1e-4: 0.687, accuracy - 0.559
-#epoch 2 loss 0.5531, accuracy = 0.7725
-
-# alpha = 0.01 no convergence is reached
-# alpha = 1e-3 is the "optimized value for alpha"
-
-dropout_conv = 0.2
-dropout_dense = 0.2
-
-model = Sequential()
-model.add(Conv2D(first_filters, kernel_size, activation = 'relu', input_shape = (96, 96, 3)))
-#model.add(Conv2D(first_filters, kernel_size, activation = 'relu'))
-#model.add(Conv2D(first_filters, kernel_size, activation = 'relu'))
-model.add(MaxPooling2D(pool_size = pool_size)) 
-model.add(Dropout(dropout_conv))
-
-model.add(Conv2D(second_filters, kernel_size, activation ='relu'))
-#model.add(Conv2D(second_filters, kernel_size, activation ='relu'))
-#model.add(Conv2D(second_filters, kernel_size, activation ='relu'))
-model.add(MaxPooling2D(pool_size = pool_size))
-model.add(Dropout(dropout_conv))
-
-model.add(Conv2D(third_filters, kernel_size, activation ='relu'))
-#model.add(Conv2D(third_filters, kernel_size, activation ='relu'))
-#model.add(Conv2D(third_filters, kernel_size, activation ='relu'))
-model.add(MaxPooling2D(pool_size = pool_size))
-model.add(Dropout(dropout_conv))
-
-model.add(Flatten())
-model.add(Dense(256, activation = "relu"))
-model.add(Dropout(dropout_dense))
-model.add(Dense(2, activation = "softmax"))
-
-model.summary()
-
-model.compile(Adam(lr=alpha), loss='binary_crossentropy', metrics=['accuracy'])
+    def analyze(self):
+        cnn = self.result
+        plt.figure(1)
+        plt.plot(cnn.history['acc'],'*-',color='b')
+        plt.show()
+        
+        plt.figure(2)
+        plt.plot(cnn.history['loss'],'*-',color='r')
+        plt.show()
+        
+        self.y_test = self.test_gen.classes
+        self.pred_proba = self.model.predict(self.test_gen)
+        self.y_pred = self.pred_proba.argmax(axis=1)
+        self.cm = confusion_matrix(self.y_test, self.y_pred)
+        
+        classes = ['no cancer', 'cancer']
+        
+        plt.figure(3)
+        plot_confusion_matrix(self.cm, classes)
+        plt.show()
+        
+        
+        
 
 
-cnn = model.fit_generator(train_gen, steps_per_epoch=train_steps,
-                    epochs=20, verbose=1)
+#%%
+class Data_Flow(object):
+    
+    def __init__(self, path, csv, n_sample, cnn_model, test_size = 0.2, random_state = 0, sample_test_dir_name = "sample_test", sample_train_dir_name = "sample_train"):
+        self.path = path
+        print(os.listdir(self.path))
+        self.df = pd.read_csv(csv)
+        self.n_sample = n_sample
+        self.sample_df = None
+        self.sample_test_dir_name = sample_test_dir_name
+        self.sample_train_dir_name = sample_train_dir_name
+        self.sample_test_dir = path + sample_test_dir_name
+        self.sample_train_dir = path + sample_train_dir_name
+        self.test_size = test_size
+        self.random_state = random_state
+        self.cnn_model = cnn_model
+    
+    def df_info(self, df, msg="\ndf_info"):
+        print(msg)
+        print(df.shape) # shape of the df
+        print(df.columns) # colnames
+        print(df.isnull().sum()) # detect null values, which is 0 for our dataset
+        print(df.label.value_counts())
+        print(df.label.mean())
+    
+    def sample(self):
+        df = self.df
+        n_sample = self.n_sample
+        df_0 = df[df.label == 0].sample(n_sample, random_state = 0)
+        df_1 = df[df.label == 1].sample(n_sample, random_state = 0)   
+        sample_df = pd.concat([df_0, df_1], axis=0).reset_index(drop=True)
+        # shuffle
+        self.sample_df = shuffle(sample_df)
+    
+    def show_img(self,label):
+        print("\nView sample images:")
+        df = self.sample_df
+        sample = df[df.label==label].sample()
+        imgid = sample.id.values[0]
+        print(sample.label.values[0])
+        img = plt.imread(path+ "train/" + imgid + ".tif")
+        plt.imshow(img)
+        
+    def gen_sample_dir(self):
+        df = self.sample_df   
+        path = self.path
+        y = df.label
+        x_train, x_test = train_test_split(df, test_size=self.test_size, random_state=self.random_state, stratify=y)
+    
+        sample_test_dir = self.sample_test_dir
+        sample_train_dir = self.sample_train_dir
+        
+        if os.path.exists(sample_test_dir):
+            rmtree(sample_test_dir)
+        if os.path.exists(sample_train_dir):
+            rmtree(sample_train_dir)
+        os.mkdir(sample_test_dir)
+        os.mkdir(os.path.join(sample_test_dir,"0"))
+        os.mkdir(os.path.join(sample_test_dir,"1"))
+        os.mkdir(sample_train_dir)
+        os.mkdir(os.path.join(sample_train_dir,"0"))
+        os.mkdir(os.path.join(sample_train_dir,"1"))
+        os.listdir(path)
+        
+        for imgid in list(x_train.id):
+            img = imgid + ".tif"
+            if x_train[x_train.id == imgid].label.iloc[0] == 0:       
+                src = os.path.join(path, "train", img)
+                dst = os.path.join(sample_train_dir,"0", img)
+                copyfile(src, dst)
+            if x_train[x_train.id == imgid].label.iloc[0] == 1:       
+                src = os.path.join(path, "train", img)
+                dst = os.path.join(sample_train_dir,"1", img)
+                copyfile(src, dst)
+            
+        for imgid in list(x_test.id):
+            img = imgid + ".tif"
+            if x_test[x_test.id == imgid].label.iloc[0] == 0:       
+                src = os.path.join(path, "train", img)
+                dst = os.path.join(sample_test_dir,"0", img)
+                copyfile(src, dst)
+            if x_test[x_test.id == imgid].label.iloc[0] == 1:       
+                src = os.path.join(path, "train", img)
+                dst = os.path.join(sample_test_dir,"1", img)
+                copyfile(src, dst)
+                
+    def gen_data(self, batch_size=None):
+        sample_train_dir = self.sample_train_dir
+        sample_test_dir = self.sample_test_dir
+        n_train = 2*len(os.listdir(os.path.join(sample_train_dir,"0")))
+        if batch_size:
+            self.cnn_model.batch_size = batch_size
+        
+        self.cnn_model.train_steps = np.ceil(n_train/batch_size)
+        
+        datagen = ImageDataGenerator(rescale=1.0/255)
+        
+        self.cnn_model.train_gen = datagen.flow_from_directory(sample_train_dir,
+                                                target_size=(IMG_SIZE,IMG_SIZE),
+                                                batch_size=batch_size,
+                                                class_mode='categorical')
+        
+        # Note: shuffle=False causes the test dataset to not be shuffled
+        self.cnn_model.test_gen = datagen.flow_from_directory(sample_test_dir,
+                                                target_size=(IMG_SIZE,IMG_SIZE),
+                                                batch_size=1,
+                                                class_mode='categorical',
+                                                shuffle=False)
 
-plt.figure(1)
-plt.plot(cnn.history['acc'],'*-',color='b')
-plt.show()
+        
 
-plt.figure(2)
-plt.plot(cnn.history['loss'],'*-',color='r')
-plt.show()
+cnn_model = CNN_Model()
+cnn_model.set_learning_rate(1e-3)
+cnn_model.set_epochs(5)
+data_flow = Data_Flow(path, path+"train_labels.csv", n_sample, cnn_model)
+data_flow.df_info(data_flow.df, msg="\nAll images:")
+data_flow.sample()
+data_flow.df_info(data_flow.sample_df, msg="\nSampled images:")
+data_flow.gen_sample_dir()
+data_flow.gen_data(batch_size=100)
+cnn_model.use_dropout()
+cnn_model.build_cnn()
+cnn_model.compile_optimization()
+cnn_model.run()
+cnn_model.analyze()
 
-y_test = test_gen.classes
-pred_proba = model.predict(test_gen)
-y_pred = pred_proba.argmax(axis=1)
-cm = confusion_matrix(y_test, y_pred)
 
-classes = ['no cancer', 'cancer']
-
-def plot_confusion_matrix(cm, classes,
-                          normalize=False,
-                          title='Confusion matrix',
-                          cmap=plt.cm.Blues):
-    """
-    This function prints and plots the confusion matrix.
-    Normalization can be applied by setting `normalize=True`.
-    """
-    if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        print("Normalized confusion matrix")
-    else:
-        print('Confusion matrix, without normalization')
-
-    print(cm)
-
-    plt.imshow(cm, interpolation='nearest', cmap=cmap)
-    plt.title(title)
-    plt.colorbar()
-    tick_marks = np.arange(len(classes))
-    plt.xticks(tick_marks, classes, rotation=45)
-    plt.yticks(tick_marks, classes)
-
-    fmt = '.2f' if normalize else 'd'
-    thresh = cm.max() / 2.
-    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, format(cm[i, j], fmt),
-                 horizontalalignment="center",
-                 color="white" if cm[i, j] > thresh else "black")
-
-    plt.ylabel('True label')
-    plt.xlabel('Predicted label')
-    plt.tight_layout()
-
-plt.figure(3)
-plot_confusion_matrix(cm, classes)
-plt.show()
