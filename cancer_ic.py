@@ -11,7 +11,7 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.layers import Conv2D, MaxPooling2D
 from tensorflow.keras.layers import Dense, Dropout, Flatten, Activation
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.optimizers import Adam, SGD
 
 from sklearn.utils import shuffle
 from sklearn.metrics import confusion_matrix
@@ -19,10 +19,15 @@ from sklearn.model_selection import train_test_split
 
 from utils import plot_confusion_matrix
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("-e", dest="epochs", required=True, help="number of epochs")
+parser.add_argument("-s", dest="samples", required=False, help="number of samples")
+parser.add_argument("-r", dest="resample", required=True, help="resample? [1-y/0-N]")
+args = parser.parse_args()
+
 #%%
 IMG_SIZE = 96
-
-n_sample = 1000
 
 N_CHANNEL = 3
 
@@ -127,9 +132,6 @@ class CNN_Model(NN_Model):
         plot_confusion_matrix(self.cm, classes)
         plt.show()
         
-        
-        
-
 
 #%%
 class Data_Flow(object):
@@ -147,6 +149,10 @@ class Data_Flow(object):
         self.test_size = test_size
         self.random_state = random_state
         self.cnn_model = cnn_model
+        
+    def filter_bad_images(self):
+        self.df[self.df['id'] != 'dd6dfed324f9fcb6f93f46f32fc800f2ec196be2']
+        self.df[self.df['id'] != '9369c7278ec8bcc6c880d99194de09fc2bd4efbe']
     
     def df_info(self, df, msg="\ndf_info"):
         print(msg)
@@ -242,19 +248,21 @@ class Data_Flow(object):
 
         
 
-cnn_model = CNN_Model()
+cnn_model = CNN_Model(kernel_size=(4,4))
 cnn_model.set_learning_rate(1e-3)
-cnn_model.set_epochs(5)
-data_flow = Data_Flow(path, path+"train_labels.csv", n_sample, cnn_model)
-data_flow.df_info(data_flow.df, msg="\nAll images:")
-data_flow.sample()
-data_flow.df_info(data_flow.sample_df, msg="\nSampled images:")
-data_flow.gen_sample_dir()
+cnn_model.set_epochs(int(args.epochs))
+data_flow = Data_Flow(path, path+"train_labels.csv", int(args.samples), cnn_model)
+data_flow.filter_bad_images()
+if bool(int(args.resample)):
+    data_flow.df_info(data_flow.df, msg="\nAll images:")
+    data_flow.sample()
+    data_flow.df_info(data_flow.sample_df, msg="\nSampled images:")
+    data_flow.gen_sample_dir()
 data_flow.gen_data(batch_size=100)
 cnn_model.use_dropout()
 cnn_model.build_cnn()
-cnn_model.compile_optimization()
+cnn_model.compile_optimization(Adam)
 cnn_model.run()
-cnn_model.analyze()
+#cnn_model.analyze()
 
 

@@ -44,13 +44,36 @@ class Circle(object):
             return True
         return False
     
+    
+    
+class Square(object):
+    def __init__(self, llc, side_length):
+        self.llc = llc
+        self.side_length = side_length
+        self.luc = Point(0.0,0.0)
+        #self.ruc = None
+        #self.rlc = None
+        
+    def unpack_points(self):
+        self.luc.x = self.llc.x
+        self.luc.y = self.llc.y + self.side_length
+        
+    
+def is_square_in_circle(square, circle):
+    square.unpack_points()
+    if circle.isinside(square.llc) and circle.isinside(square.luc):
+        return True
+    return False
+    
+    
 # Write a class of a Square on a 2D plane (give it some attributes to define the size and position)
 # Write a method def isincircle(self, circle<--object): return True if the square is completely inside the circle
 # make an instance of the Square class and test your method
         
 center = Point(0.0, 0.0)
 circle = Circle("red", 1.0, center)
-print(circle.isinside(circle.center))
-print(circle.isinside(Point(1.0,2.0)))
-
+square = Square(Point(0.0, 0.0), 2.0)
+#print(circle.isinside(circle.center))
+#print(circle.isinside(Point(1.0,2.0)))
+print(is_square_in_circle(square, circle))
         
