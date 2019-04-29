@@ -31,8 +31,7 @@ IMG_SIZE = 96
 
 N_CHANNEL = 3
 
-path = "/Users/Qi-MAC/Work/storage/" # path you put all the data, don't forget the ending slash!
-
+path = "/dev/shm/80kdata/" # path you put all the data, don't forget the ending slash!
 
 #%%
 class NN_Model(object):
@@ -223,7 +222,7 @@ class Data_Flow(object):
                 dst = os.path.join(sample_test_dir,"1", img)
                 copyfile(src, dst)
                 
-    def gen_data(self, batch_size=None):
+    def gen_data(self, train_batch_size=None, va):
         sample_train_dir = self.sample_train_dir
         sample_test_dir = self.sample_test_dir
         n_train = 2*len(os.listdir(os.path.join(sample_train_dir,"0")))
@@ -240,7 +239,7 @@ class Data_Flow(object):
                                                 class_mode='categorical')
         
         # Note: shuffle=False causes the test dataset to not be shuffled
-        self.cnn_model.test_gen = datagen.flow_from_directory(sample_test_dir,
+        self.cnn_model.val_gen = datagen.flow_from_directory(sample_test_dir,
                                                 target_size=(IMG_SIZE,IMG_SIZE),
                                                 batch_size=1,
                                                 class_mode='categorical',
@@ -248,7 +247,7 @@ class Data_Flow(object):
 
         
 
-cnn_model = CNN_Model(kernel_size=(4,4))
+cnn_model = CNN_Model(kernel_size=(3,3),pool_size=(2,2))
 cnn_model.set_learning_rate(1e-3)
 cnn_model.set_epochs(int(args.epochs))
 data_flow = Data_Flow(path, path+"train_labels.csv", int(args.samples), cnn_model)
@@ -259,7 +258,7 @@ if bool(int(args.resample)):
     data_flow.df_info(data_flow.sample_df, msg="\nSampled images:")
     data_flow.gen_sample_dir()
 data_flow.gen_data(batch_size=100)
-cnn_model.use_dropout()
+#cnn_model.use_dropout()
 cnn_model.build_cnn()
 cnn_model.compile_optimization(Adam)
 cnn_model.run()
